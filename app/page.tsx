@@ -59,6 +59,18 @@ export default function Page() {
     } catch { return Object.fromEntries(ONIGIRI.map(o => [o.id, Math.floor(Math.random() * 80 + 10)])); }
   });
 
+  // 投票期間チェック
+  const [periodActive, setPeriodActive] = useState<boolean | null>(null); // null=未判定
+  useEffect(() => {
+    try {
+      const p = localStorage.getItem("chobei_period");
+      if (!p) { setPeriodActive(true); return; }
+      const { start, end } = JSON.parse(p);
+      const now = new Date();
+      setPeriodActive(new Date(start) <= now && now <= new Date(end));
+    } catch { setPeriodActive(true); }
+  }, []);
+
   // 直前に投票したIDリスト（表示用）
   const [myVotes, setMyVotes] = useState<string[]>([]);
 
@@ -94,7 +106,7 @@ export default function Page() {
     .map((o, i) => ({ ...o, rank: i + 1 }));
 
   function toggleSelect(id: string) {
-    if (hasVoted) return;
+    if (hasVoted || !periodActive) return;
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -166,9 +178,21 @@ export default function Page() {
         <p className="sans" style={{ fontSize:"0.88rem", color:"var(--mid)", lineHeight:1.85, maxWidth:480, margin:"0 auto 12px" }}>
           お気に入りのおにぎりを最大3つ選んで、「投票する」ボタンを押してください。
         </p>
-        <p className="sans" style={{ fontSize:"0.75rem", color:"var(--accent)", marginBottom: hasVoted ? 24 : 0 }}>
-          1人3票まで投票できます。
-        </p>
+        {periodActive === false && (
+          <div style={{
+            display:"inline-block", padding:"10px 28px", marginBottom:12,
+            background:"#fff8ee", border:"1px solid var(--gold)", borderRadius:2,
+          }}>
+            <span className="sans" style={{ fontSize:"0.8rem", color:"var(--accent)" }}>
+              現在は投票期間外です
+            </span>
+          </div>
+        )}
+        {periodActive !== false && (
+          <p className="sans" style={{ fontSize:"0.75rem", color:"var(--accent)", marginBottom: hasVoted ? 24 : 0 }}>
+            1人3票まで投票できます。
+          </p>
+        )}
 
         {submitted && (
           <div style={{
@@ -385,7 +409,7 @@ export default function Page() {
       </div>
 
       {/* ══ 固定投票ボタン（投票前・選択中のみ表示） ══ */}
-      {tab === "vote" && !hasVoted && (
+      {tab === "vote" && !hasVoted && periodActive && (
         <div style={{
           position:"fixed", bottom:0, left:0, right:0,
           background:"var(--white)", borderTop:"1px solid var(--line)",
