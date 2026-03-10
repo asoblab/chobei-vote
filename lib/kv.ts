@@ -1,17 +1,18 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { Redis } from "@upstash/redis";
 
-let _client: SupabaseClient | null = null;
-function getClient(): SupabaseClient {
+let _client: Redis | null = null;
+function getClient(): Redis {
   if (!_client) {
-    _client = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    _client = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL!,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    });
   }
   return _client;
 }
-// supabase → getClient() に置き換え用エイリアス
-const supabase = { get from() { return getClient().from.bind(getClient()); }, get rpc() { return getClient().rpc.bind(getClient()); } };
+
+export const VOTES_KEY = "chobei:votes";
+export const PERIOD_KEY = "chobei:period";
 
 export const VALID_IDS = new Set([
   "shio","zakkoku","shiso","okaka","ume","takana","gyushigure",
@@ -20,31 +21,31 @@ export const VALID_IDS = new Set([
 ]);
 
 export async function getVotes(): Promise<Record<string, number>> {
-  const { data } = await supabase.from("votes").select("id, count");
-  if (!data) return Object.fromEntries([...VALID_IDS].map(id => [id, 0]));
-  return Object.fromEntries(data.map((r: { id: string; count: number }) => [r.id, r.count]));
+  const raw = await getClient().hgetall<Record<string, string>>(VOTES_KEY);
+  if (!raw) return Object.fromEntries([...VALID_IDS].map(id => [id, 0]));
+  return Object.fromEntries(
+    [...VALID_IDS].map(id => [id, parseInt(raw[id] ?? "0", 10)])
+  );
 }
 
 export async function getPeriod(): Promise<{ start: string; end: string } | null> {
-  const { data } = await supabase.from("period").select("start_at, end_at").eq("id", 1).single();
-  if (!data || !data.start_at) return null;
-  return { start: data.start_at, end: data.end_at };
+  return getClient().get<{ start: string; end: string }>(PERIOD_KEY);
 }
 
 export async function incrementVotes(ids: string[]): Promise<void> {
-  await supabase.rpc("increment_votes", { vote_ids: ids });
+  await Promise.all(ids.map(id => getClient().hincrby(VOTES_KEY, id, 1)));
 }
 
 export async function setPeriod(start: string, end: string): Promise<void> {
-  await supabase.from("period").upsert({ id: 1, start_at: start, end_at: end });
+  await getClient().set(PERIOD_KEY, { start, end });
 }
 
 export async function clearPeriod(): Promise<void> {
-  await supabase.from("period").update({ start_at: null, end_at: null }).eq("id", 1);
+  await getClient().del(PERIOD_KEY);
 }
 
 export async function resetVotes(): Promise<void> {
-  await supabase.from("votes").update({ count: 0 }).in("id", [...VALID_IDS]);
+  await getClient().del(VOTES_KEY);
 }
 
 export function checkAdminKey(request: Request): boolean {
