@@ -59,21 +59,15 @@ export default function Page() {
     } catch { return Object.fromEntries(ONIGIRI.map(o => [o.id, Math.floor(Math.random() * 80 + 10)])); }
   });
 
-  // 投票済みのIDリスト（最大3つ）
-  const [myVotes, setMyVotes] = useState<string[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const saved = localStorage.getItem("chobei_my_votes_v2");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  // 直前に投票したIDリスト（表示用）
+  const [myVotes, setMyVotes] = useState<string[]>([]);
 
   // 選択中（まだ投票前）
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"vote" | "ranking">("vote");
   const [submitted, setSubmitted] = useState(false);
 
-  const hasVoted = myVotes.length > 0;
+  const hasVoted = submitted;
 
   useEffect(() => {
     localStorage.setItem("chobei_votes_v2", JSON.stringify(votes));
@@ -114,7 +108,7 @@ export default function Page() {
   }
 
   function handleSubmit() {
-    if (selected.size === 0 || hasVoted) return;
+    if (selected.size === 0) return;
     const ids = [...selected];
     setVotes(prev => {
       const next = { ...prev };
@@ -122,9 +116,17 @@ export default function Page() {
       return next;
     });
     setMyVotes(ids);
-    localStorage.setItem("chobei_my_votes_v2", JSON.stringify(ids));
     setSubmitted(true);
     setTimeout(() => setTab("ranking"), 1400);
+  }
+
+  function handleTabChange(t: "vote" | "ranking") {
+    if (t === "vote") {
+      setSelected(new Set());
+      setSubmitted(false);
+      setMyVotes([]);
+    }
+    setTab(t);
   }
 
   return (
@@ -183,7 +185,7 @@ export default function Page() {
       {/* タブ */}
       <div style={{ background:"var(--white)", borderBottom:"1px solid var(--line)", display:"flex", maxWidth:900, margin:"0 auto" }}>
         {([["vote","投票する"],["ranking","ランキング"]] as const).map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)} className="sans" style={{
+          <button key={key} onClick={() => handleTabChange(key)} className="sans" style={{
             flex:1, padding:"14px 0",
             fontSize:"0.82rem", letterSpacing:"0.1em",
             color: tab === key ? "var(--accent)" : "var(--mid)",
@@ -367,7 +369,7 @@ export default function Page() {
 
             {!hasVoted && (
               <div style={{ textAlign:"center", marginTop:40 }}>
-                <button onClick={() => setTab("vote")} className="sans" style={{
+                <button onClick={() => handleTabChange("vote")} className="sans" style={{
                   padding:"12px 40px",
                   border:"1px solid var(--accent)", background:"transparent",
                   color:"var(--accent)", fontSize:"0.8rem", letterSpacing:"0.12em",
