@@ -55,8 +55,8 @@ export default function Page() {
     if (typeof window === "undefined") return Object.fromEntries(ONIGIRI.map(o => [o.id, 0]));
     try {
       const saved = localStorage.getItem("chobei_votes_v2");
-      return saved ? JSON.parse(saved) : Object.fromEntries(ONIGIRI.map(o => [o.id, Math.floor(Math.random() * 80 + 10)]));
-    } catch { return Object.fromEntries(ONIGIRI.map(o => [o.id, Math.floor(Math.random() * 80 + 10)])); }
+      return saved ? JSON.parse(saved) : Object.fromEntries(ONIGIRI.map(o => [o.id, 0]));
+    } catch { return Object.fromEntries(ONIGIRI.map(o => [o.id, 0])); }
   });
 
   // 投票期間チェック
