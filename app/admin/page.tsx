@@ -1,8 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-
-const ADMIN_PASSWORD = "chobei2024";
+import { useState } from "react";
 
 const ONIGIRI_NAMES: Record<string, string> = {
   shio:"塩おにぎり", zakkoku:"雑穀米もち麦", shiso:"しそ昆布",
@@ -15,81 +13,101 @@ const ONIGIRI_NAMES: Record<string, string> = {
 type Period = { start: string; end: string } | null;
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString("ja-JP", { timeZone:"Asia/Tokyo",
-    year:"numeric", month:"2-digit", day:"2-digit",
-    hour:"2-digit", minute:"2-digit" });
+  return new Date(iso).toLocaleString("ja-JP", {
+    timeZone:"Asia/Tokyo", year:"numeric", month:"2-digit", day:"2-digit",
+    hour:"2-digit", minute:"2-digit",
+  });
 }
 
 function toLocalInput(iso: string) {
-  // datetime-local input requires "YYYY-MM-DDTHH:mm"
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
   const [pw, setPw] = useState("");
+  const [adminKey, setAdminKey] = useState<string | null>(null); // ログイン成功後に保持
   const [pwError, setPwError] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const [votes, setVotes] = useState<Record<string, number>>({});
   const [period, setPeriod] = useState<Period>(null);
   const [startInput, setStartInput] = useState("");
   const [endInput, setEndInput] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [resetDone, setResetDone] = useState(false);
+  const [periodMsg, setPeriodMsg] = useState("");
+  const [resetMsg, setResetMsg] = useState("");
 
-  useEffect(() => {
-    if (!authed) return;
+  const authed = !!adminKey;
+
+  async function login() {
+    setLoginLoading(true);
+    setPwError(false);
     try {
-      const v = localStorage.getItem("chobei_votes_v2");
-      if (v) setVotes(JSON.parse(v));
-      const p = localStorage.getItem("chobei_period");
+      const res = await fetch("/api/admin/stats", {
+        headers: { "x-admin-key": pw },
+      });
+      if (res.status === 401) { setPwError(true); return; }
+      const { votes: v, period: p } = await res.json();
+      setVotes(v);
+      setPeriod(p);
       if (p) {
-        const parsed: Period = JSON.parse(p);
-        setPeriod(parsed);
-        if (parsed) {
-          setStartInput(toLocalInput(parsed.start));
-          setEndInput(toLocalInput(parsed.end));
-        }
+        setStartInput(toLocalInput(p.start));
+        setEndInput(toLocalInput(p.end));
       }
-    } catch {}
-  }, [authed]);
-
-  function login() {
-    if (pw === ADMIN_PASSWORD) {
-      setAuthed(true);
-      setPwError(false);
-    } else {
+      setAdminKey(pw);
+    } catch {
       setPwError(true);
+    } finally {
+      setLoginLoading(false);
     }
   }
 
-  function savePeriod() {
-    if (!startInput || !endInput) return;
-    const p: Period = {
-      start: new Date(startInput).toISOString(),
-      end: new Date(endInput).toISOString(),
-    };
-    localStorage.setItem("chobei_period", JSON.stringify(p));
+  async function refreshStats() {
+    const res = await fetch("/api/admin/stats", { headers: { "x-admin-key": adminKey! } });
+    const { votes: v, period: p } = await res.json();
+    setVotes(v);
     setPeriod(p);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
   }
 
-  function clearPeriod() {
-    localStorage.removeItem("chobei_period");
-    setPeriod(null);
+  async function savePeriod() {
+    if (!startInput || !endInput) return;
+    const res = await fetch("/api/admin/period", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-key": adminKey! },
+      body: JSON.stringify({
+        start: new Date(startInput).toISOString(),
+        end: new Date(endInput).toISOString(),
+      }),
+    });
+    if (res.ok) {
+      await refreshStats();
+      setPeriodMsg("保存しました ✓");
+      setTimeout(() => setPeriodMsg(""), 2500);
+    }
+  }
+
+  async function clearPeriod() {
+    await fetch("/api/admin/period", {
+      method: "DELETE",
+      headers: { "x-admin-key": adminKey! },
+    });
+    await refreshStats();
     setStartInput("");
     setEndInput("");
   }
 
-  function resetVotes() {
+  async function resetVotes() {
     if (!confirm("本当に投票データをリセットしますか？この操作は取り消せません。")) return;
-    localStorage.removeItem("chobei_votes_v2");
-    setVotes({});
-    setResetDone(true);
-    setTimeout(() => setResetDone(false), 2000);
+    const res = await fetch("/api/admin/reset", {
+      method: "POST",
+      headers: { "x-admin-key": adminKey! },
+    });
+    if (res.ok) {
+      await refreshStats();
+      setResetMsg("リセット完了 ✓");
+      setTimeout(() => setResetMsg(""), 2500);
+    }
   }
 
   const totalVotes = Object.values(votes).reduce((a, b) => a + b, 0);
@@ -102,101 +120,59 @@ export default function AdminPage() {
     ? new Date(period.start) <= now && now <= new Date(period.end)
     : true;
 
+  const S = {
+    card: { background:"white", border:"1px solid #e8e2d8", borderRadius:4, padding:"28px 28px 24px", marginBottom:20 } as React.CSSProperties,
+    h2: { fontSize:"0.75rem", letterSpacing:"0.2em", color:"#8b5e3c", marginBottom:20, paddingBottom:12, borderBottom:"1px solid #e8e2d8" } as React.CSSProperties,
+    label: { fontSize:"0.72rem", color:"#6b6560", letterSpacing:"0.08em", display:"block", marginBottom:6 } as React.CSSProperties,
+    input: { padding:"9px 12px", border:"1px solid #e8e2d8", borderRadius:2, fontSize:"0.82rem", fontFamily:"inherit", outline:"none", width:"100%" } as React.CSSProperties,
+    btn: (color: string) => ({ padding:"9px 24px", background:color, color:"white", border:"none", borderRadius:2, fontSize:"0.78rem", letterSpacing:"0.1em", cursor:"pointer", fontFamily:"inherit" } as React.CSSProperties),
+  };
+
   /* ── ログイン画面 ── */
   if (!authed) {
     return (
-      <div style={{
-        minHeight:"100vh", background:"#faf9f6",
-        display:"flex", alignItems:"center", justifyContent:"center",
-        fontFamily:'"Hiragino Kaku Gothic ProN", sans-serif',
-      }}>
-        <div style={{
-          background:"white", border:"1px solid #e8e2d8",
-          borderRadius:4, padding:"48px 40px", width:320, textAlign:"center",
-        }}>
+      <div style={{ minHeight:"100vh", background:"#faf9f6", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:'"Hiragino Kaku Gothic ProN", sans-serif' }}>
+        <div style={{ background:"white", border:"1px solid #e8e2d8", borderRadius:4, padding:"48px 40px", width:320, textAlign:"center" }}>
           <div style={{ fontSize:"1.1rem", letterSpacing:"0.25em", color:"#1c1c1c", marginBottom:6 }}>長米</div>
           <div style={{ fontSize:"0.65rem", color:"#6b6560", letterSpacing:"0.15em", marginBottom:32 }}>管理画面</div>
           <input
-            type="password"
-            value={pw}
+            type="password" value={pw}
             onChange={e => { setPw(e.target.value); setPwError(false); }}
             onKeyDown={e => { if (e.key === "Enter") login(); }}
             placeholder="パスワード"
-            style={{
-              width:"100%", padding:"10px 14px",
-              border: pwError ? "1px solid #e05050" : "1px solid #e8e2d8",
-              borderRadius:2, fontSize:"0.9rem",
-              outline:"none", marginBottom:8,
-              fontFamily:"inherit",
-            }}
+            style={{ width:"100%", padding:"10px 14px", border: pwError ? "1px solid #e05050" : "1px solid #e8e2d8", borderRadius:2, fontSize:"0.9rem", outline:"none", marginBottom:8, fontFamily:"inherit" }}
           />
           {pwError && <p style={{ fontSize:"0.72rem", color:"#e05050", marginBottom:8 }}>パスワードが違います</p>}
-          <button onClick={login} style={{
-            width:"100%", padding:"10px 0",
-            background:"#8b5e3c", color:"white", border:"none",
-            borderRadius:2, fontSize:"0.82rem", letterSpacing:"0.12em",
-            cursor:"pointer", fontFamily:"inherit",
-          }}>ログイン</button>
+          <button onClick={login} disabled={loginLoading} style={{ width:"100%", padding:"10px 0", background:"#8b5e3c", color:"white", border:"none", borderRadius:2, fontSize:"0.82rem", letterSpacing:"0.12em", cursor:"pointer", fontFamily:"inherit" }}>
+            {loginLoading ? "確認中…" : "ログイン"}
+          </button>
         </div>
       </div>
     );
   }
 
   /* ── 管理画面 ── */
-  const S = {
-    card: {
-      background:"white", border:"1px solid #e8e2d8",
-      borderRadius:4, padding:"28px 28px 24px", marginBottom:20,
-    } as React.CSSProperties,
-    h2: {
-      fontSize:"0.75rem", letterSpacing:"0.2em", color:"#8b5e3c",
-      marginBottom:20, paddingBottom:12,
-      borderBottom:"1px solid #e8e2d8",
-    } as React.CSSProperties,
-    label: {
-      fontSize:"0.72rem", color:"#6b6560", letterSpacing:"0.08em",
-      display:"block", marginBottom:6,
-    } as React.CSSProperties,
-    input: {
-      padding:"9px 12px", border:"1px solid #e8e2d8", borderRadius:2,
-      fontSize:"0.82rem", fontFamily:"inherit", outline:"none",
-      width:"100%",
-    } as React.CSSProperties,
-    btn: (color: string) => ({
-      padding:"9px 24px", background:color, color:"white",
-      border:"none", borderRadius:2, fontSize:"0.78rem",
-      letterSpacing:"0.1em", cursor:"pointer", fontFamily:"inherit",
-    } as React.CSSProperties),
-  };
-
   return (
-    <div style={{
-      minHeight:"100vh", background:"#faf9f6",
-      fontFamily:'"Hiragino Kaku Gothic ProN", sans-serif',
-    }}>
-      {/* ヘッダー */}
-      <header style={{ background:"white", borderBottom:"1px solid #e8e2d8", padding:"0 24px", height:56,
-        display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+    <div style={{ minHeight:"100vh", background:"#faf9f6", fontFamily:'"Hiragino Kaku Gothic ProN", sans-serif' }}>
+      <header style={{ background:"white", borderBottom:"1px solid #e8e2d8", padding:"0 24px", height:56, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
         <div>
           <span style={{ fontSize:"1rem", letterSpacing:"0.2em", color:"#1c1c1c" }}>長米</span>
           <span style={{ fontSize:"0.65rem", color:"#6b6560", marginLeft:12, letterSpacing:"0.1em" }}>管理画面</span>
         </div>
-        <button onClick={() => setAuthed(false)} style={{
-          background:"transparent", border:"1px solid #e8e2d8", borderRadius:2,
-          padding:"6px 16px", fontSize:"0.72rem", color:"#6b6560", cursor:"pointer",
-          fontFamily:"inherit",
-        }}>ログアウト</button>
+        <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+          <button onClick={refreshStats} style={{ background:"transparent", border:"1px solid #e8e2d8", borderRadius:2, padding:"6px 16px", fontSize:"0.72rem", color:"#6b6560", cursor:"pointer", fontFamily:"inherit" }}>
+            更新
+          </button>
+          <button onClick={() => setAdminKey(null)} style={{ background:"transparent", border:"1px solid #e8e2d8", borderRadius:2, padding:"6px 16px", fontSize:"0.72rem", color:"#6b6560", cursor:"pointer", fontFamily:"inherit" }}>
+            ログアウト
+          </button>
+        </div>
       </header>
 
       <div style={{ maxWidth:780, margin:"0 auto", padding:"32px 24px 80px" }}>
 
         {/* ステータスバナー */}
-        <div style={{
-          background: isActive ? "#f0fff4" : "#fff8ee",
-          border: `1px solid ${isActive ? "#68d391" : "#c8a060"}`,
-          borderRadius:4, padding:"12px 20px", marginBottom:20,
-          display:"flex", alignItems:"center", gap:10,
-        }}>
+        <div style={{ background: isActive ? "#f0fff4" : "#fff8ee", border:`1px solid ${isActive ? "#68d391" : "#c8a060"}`, borderRadius:4, padding:"12px 20px", marginBottom:20 }}>
           <span style={{ fontSize:"0.7rem", color: isActive ? "#276749" : "#8b5e3c" }}>
             {period
               ? isActive
@@ -214,21 +190,17 @@ export default function AdminPage() {
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
             <div>
               <label style={S.label}>開始日時</label>
-              <input type="datetime-local" value={startInput}
-                onChange={e => setStartInput(e.target.value)} style={S.input}/>
+              <input type="datetime-local" value={startInput} onChange={e => setStartInput(e.target.value)} style={S.input}/>
             </div>
             <div>
               <label style={S.label}>終了日時</label>
-              <input type="datetime-local" value={endInput}
-                onChange={e => setEndInput(e.target.value)} style={S.input}/>
+              <input type="datetime-local" value={endInput} onChange={e => setEndInput(e.target.value)} style={S.input}/>
             </div>
           </div>
           <div style={{ display:"flex", gap:10, alignItems:"center" }}>
             <button onClick={savePeriod} style={S.btn("#8b5e3c")}>保存</button>
-            {period && (
-              <button onClick={clearPeriod} style={S.btn("#a0a0a0")}>期間を削除（常時受付に戻す）</button>
-            )}
-            {saved && <span style={{ fontSize:"0.72rem", color:"#48bb78" }}>保存しました ✓</span>}
+            {period && <button onClick={clearPeriod} style={S.btn("#a0a0a0")}>期間を削除（常時受付に戻す）</button>}
+            {periodMsg && <span style={{ fontSize:"0.72rem", color:"#48bb78" }}>{periodMsg}</span>}
           </div>
         </div>
 
@@ -243,14 +215,9 @@ export default function AdminPage() {
           <table style={{ width:"100%", borderCollapse:"collapse", fontSize:"0.82rem" }}>
             <thead>
               <tr>
-                <th style={{ textAlign:"left", padding:"8px 4px", borderBottom:"1px solid #e8e2d8",
-                  fontSize:"0.68rem", color:"#6b6560", letterSpacing:"0.08em", fontWeight:400 }}>順位</th>
-                <th style={{ textAlign:"left", padding:"8px 4px", borderBottom:"1px solid #e8e2d8",
-                  fontSize:"0.68rem", color:"#6b6560", letterSpacing:"0.08em", fontWeight:400 }}>商品名</th>
-                <th style={{ textAlign:"right", padding:"8px 4px", borderBottom:"1px solid #e8e2d8",
-                  fontSize:"0.68rem", color:"#6b6560", letterSpacing:"0.08em", fontWeight:400 }}>票数</th>
-                <th style={{ textAlign:"right", padding:"8px 4px", borderBottom:"1px solid #e8e2d8",
-                  fontSize:"0.68rem", color:"#6b6560", letterSpacing:"0.08em", fontWeight:400 }}>割合</th>
+                {["順位","商品名","票数","割合"].map((h, i) => (
+                  <th key={h} style={{ textAlign: i >= 2 ? "right" : "left", padding:"8px 4px", borderBottom:"1px solid #e8e2d8", fontSize:"0.68rem", color:"#6b6560", letterSpacing:"0.08em", fontWeight:400 }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -259,23 +226,15 @@ export default function AdminPage() {
                 const barW = totalVotes > 0 ? item.count / totalVotes * 100 : 0;
                 return (
                   <tr key={item.id}>
-                    <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", color:"#6b6560", width:32 }}>
-                      {i + 1}
-                    </td>
+                    <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", color:"#6b6560", width:32 }}>{i + 1}</td>
                     <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", color:"#1c1c1c" }}>
                       <div>{item.name}</div>
                       <div style={{ height:3, borderRadius:2, background:"#f0ece6", marginTop:4, overflow:"hidden" }}>
-                        <div style={{
-                          height:"100%", borderRadius:2,
-                          width:`${barW}%`,
-                          background: i === 0 ? "#c8a060" : i === 1 ? "#a8a8a8" : i === 2 ? "#b87040" : "#d8d0c4",
-                        }}/>
+                        <div style={{ height:"100%", borderRadius:2, width:`${barW}%`, background: i===0?"#c8a060":i===1?"#a8a8a8":i===2?"#b87040":"#d8d0c4" }}/>
                       </div>
                     </td>
-                    <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", textAlign:"right",
-                      fontFamily:"monospace", color:"#1c1c1c" }}>{item.count.toLocaleString()}</td>
-                    <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", textAlign:"right",
-                      fontFamily:"monospace", color:"#6b6560" }}>{pct}%</td>
+                    <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", textAlign:"right", fontFamily:"monospace", color:"#1c1c1c" }}>{item.count.toLocaleString()}</td>
+                    <td style={{ padding:"10px 4px", borderBottom:"1px solid #f0ece6", textAlign:"right", fontFamily:"monospace", color:"#6b6560" }}>{pct}%</td>
                   </tr>
                 );
               })}
@@ -291,7 +250,7 @@ export default function AdminPage() {
           </p>
           <div style={{ display:"flex", alignItems:"center", gap:12 }}>
             <button onClick={resetVotes} style={S.btn("#e05050")}>投票データをリセット</button>
-            {resetDone && <span style={{ fontSize:"0.72rem", color:"#48bb78" }}>リセット完了 ✓</span>}
+            {resetMsg && <span style={{ fontSize:"0.72rem", color:"#48bb78" }}>{resetMsg}</span>}
           </div>
         </div>
 

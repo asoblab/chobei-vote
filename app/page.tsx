@@ -51,24 +51,24 @@ function Medal({ rank }: { rank: number }) {
 
 export default function Page() {
 
-  const [votes, setVotes] = useState<Record<string, number>>(() => {
-    if (typeof window === "undefined") return Object.fromEntries(ONIGIRI.map(o => [o.id, 0]));
-    try {
-      const saved = localStorage.getItem("chobei_votes_v2");
-      return saved ? JSON.parse(saved) : Object.fromEntries(ONIGIRI.map(o => [o.id, 0]));
-    } catch { return Object.fromEntries(ONIGIRI.map(o => [o.id, 0])); }
-  });
+  const [votes, setVotes] = useState<Record<string, number>>(
+    Object.fromEntries(ONIGIRI.map(o => [o.id, 0]))
+  );
+  const [periodActive, setPeriodActive] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // 投票期間チェック
-  const [periodActive, setPeriodActive] = useState<boolean | null>(null); // null=未判定
+  // サーバーから票数と投票期間を取得
   useEffect(() => {
-    try {
-      const p = localStorage.getItem("chobei_period");
-      if (!p) { setPeriodActive(true); return; }
-      const { start, end } = JSON.parse(p);
-      const now = new Date();
-      setPeriodActive(new Date(start) <= now && now <= new Date(end));
-    } catch { setPeriodActive(true); }
+    fetch("/api/votes")
+      .then(r => r.json())
+      .then(({ votes: v, period }) => {
+        setVotes(v);
+        if (!period) { setPeriodActive(true); return; }
+        const now = new Date();
+        setPeriodActive(new Date(period.start) <= now && now <= new Date(period.end));
+      })
+      .catch(() => setPeriodActive(true))
+      .finally(() => setLoading(false));
   }, []);
 
   // 直前に投票したIDリスト（表示用）
@@ -78,12 +78,10 @@ export default function Page() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"vote" | "ranking">("vote");
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const hasVoted = submitted;
-
-  useEffect(() => {
-    localStorage.setItem("chobei_votes_v2", JSON.stringify(votes));
-  }, [votes]);
 
   // タブ切替時にreveal要素を再監視
   useEffect(() => {
@@ -112,24 +110,40 @@ export default function Page() {
       if (next.has(id)) {
         next.delete(id);
       } else {
-        if (next.size >= MAX_VOTES) return prev; // 3票上限
+        if (next.size >= MAX_VOTES) return prev;
         next.add(id);
       }
       return next;
     });
   }
 
-  function handleSubmit() {
-    if (selected.size === 0) return;
+  async function handleSubmit() {
+    if (selected.size === 0 || submitting) return;
     const ids = [...selected];
-    setVotes(prev => {
-      const next = { ...prev };
-      ids.forEach(id => { next[id] = (next[id] ?? 0) + 1; });
-      return next;
-    });
-    setMyVotes(ids);
-    setSubmitted(true);
-    setTimeout(() => setTab("ranking"), 1400);
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/vote", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) {
+        const { error } = await res.json();
+        setSubmitError(error === "outside voting period" ? "投票期間外です" : "投票に失敗しました");
+        return;
+      }
+      // 最新票数を再取得
+      const { votes: newVotes } = await fetch("/api/votes").then(r => r.json());
+      setVotes(newVotes);
+      setMyVotes(ids);
+      setSubmitted(true);
+      setTimeout(() => setTab("ranking"), 1400);
+    } catch {
+      setSubmitError("通信エラーが発生しました");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleTabChange(t: "vote" | "ranking") {
@@ -137,6 +151,9 @@ export default function Page() {
       setSelected(new Set());
       setSubmitted(false);
       setMyVotes([]);
+      setSubmitError(null);
+      // 最新票数を再取得
+      fetch("/api/votes").then(r => r.json()).then(({ votes: v }) => setVotes(v)).catch(() => {});
     }
     setTab(t);
   }
@@ -178,6 +195,9 @@ export default function Page() {
         <p className="sans" style={{ fontSize:"0.88rem", color:"var(--mid)", lineHeight:1.85, maxWidth:480, margin:"0 auto 12px" }}>
           お気に入りのおにぎりを最大3つ選んで、「投票する」ボタンを押してください。
         </p>
+        {loading && (
+          <p className="sans" style={{ fontSize:"0.75rem", color:"var(--mid)", marginBottom:12 }}>読み込み中…</p>
+        )}
         {periodActive === false && (
           <div style={{
             display:"inline-block", padding:"10px 28px", marginBottom:12,
@@ -417,25 +437,30 @@ export default function Page() {
           display:"flex", alignItems:"center", justifyContent:"center", gap:16,
           zIndex:100,
         }}>
-          <span className="sans" style={{ fontSize:"0.8rem", color:"var(--mid)" }}>
-            {selected.size > 0 ? `${selected.size}/${MAX_VOTES} 票選択中` : `最大${MAX_VOTES}つ選んでください`}
-          </span>
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+            <span className="sans" style={{ fontSize:"0.8rem", color:"var(--mid)" }}>
+              {selected.size > 0 ? `${selected.size}/${MAX_VOTES} 票選択中` : `最大${MAX_VOTES}つ選んでください`}
+            </span>
+            {submitError && (
+              <span className="sans" style={{ fontSize:"0.72rem", color:"#e05050" }}>{submitError}</span>
+            )}
+          </div>
           <button
             onClick={handleSubmit}
-            disabled={selected.size === 0}
+            disabled={selected.size === 0 || submitting}
             className="sans"
             style={{
               padding:"12px 48px",
-              background: selected.size > 0 ? "var(--accent)" : "var(--line)",
-              color: selected.size > 0 ? "white" : "var(--mid)",
+              background: selected.size > 0 && !submitting ? "var(--accent)" : "var(--line)",
+              color: selected.size > 0 && !submitting ? "white" : "var(--mid)",
               border:"none", borderRadius:2,
               fontSize:"0.9rem", letterSpacing:"0.15em",
-              cursor: selected.size > 0 ? "pointer" : "default",
+              cursor: selected.size > 0 && !submitting ? "pointer" : "default",
               transition:"all 0.2s",
               fontFamily:"inherit",
             }}
           >
-            投票する
+            {submitting ? "送信中…" : "投票する"}
           </button>
         </div>
       )}
