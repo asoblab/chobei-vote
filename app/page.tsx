@@ -129,8 +129,12 @@ export default function Page() {
         body: JSON.stringify({ ids }),
       });
       if (!res.ok) {
-        const { error } = await res.json();
-        setSubmitError(error === "outside voting period" ? "投票期間外です" : "投票に失敗しました");
+        try {
+          const { error } = await res.json();
+          setSubmitError(error === "outside voting period" ? "投票期間外です" : "投票に失敗しました");
+        } catch {
+          setSubmitError("投票に失敗しました");
+        }
         return;
       }
       // 最新票数を再取得
