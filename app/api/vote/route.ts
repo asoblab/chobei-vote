@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { redis, VOTES_KEY, VALID_IDS, getPeriod } from "@/lib/kv";
+import { VALID_IDS, getPeriod, incrementVotes } from "@/lib/kv";
 
 export async function POST(req: NextRequest) {
   let ids: unknown;
@@ -16,7 +16,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid id" }, { status: 400 });
   }
 
-  // 投票期間チェック
   const period = await getPeriod();
   if (period) {
     const now = new Date();
@@ -25,8 +24,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // アトミックにインクリメント
-  await Promise.all((ids as string[]).map(id => redis.hincrby(VOTES_KEY, id, 1)));
-
+  await incrementVotes(ids as string[]);
   return NextResponse.json({ ok: true });
 }

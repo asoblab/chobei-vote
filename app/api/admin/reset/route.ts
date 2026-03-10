@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { redis, VOTES_KEY, checkAdminKey } from "@/lib/kv";
+import { resetVotes, checkAdminKey } from "@/lib/kv";
 
 export async function POST(req: NextRequest) {
   if (!checkAdminKey(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  await redis.del(VOTES_KEY);
+  await resetVotes();
   return NextResponse.json({ ok: true });
 }
