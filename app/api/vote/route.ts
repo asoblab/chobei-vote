@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { kv } from "@vercel/kv";
-import { VOTES_KEY, VALID_IDS, getPeriod } from "@/lib/kv";
+import { redis, VOTES_KEY, VALID_IDS, getPeriod } from "@/lib/kv";
 
 export async function POST(req: NextRequest) {
   let ids: unknown;
@@ -27,7 +26,7 @@ export async function POST(req: NextRequest) {
   }
 
   // アトミックにインクリメント
-  await Promise.all((ids as string[]).map(id => kv.hincrby(VOTES_KEY, id, 1)));
+  await Promise.all((ids as string[]).map(id => redis.hincrby(VOTES_KEY, id, 1)));
 
   return NextResponse.json({ ok: true });
 }

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { kv } from "@vercel/kv";
-import { PERIOD_KEY, checkAdminKey } from "@/lib/kv";
+import { redis, PERIOD_KEY, checkAdminKey } from "@/lib/kv";
 
 export async function POST(req: NextRequest) {
   if (!checkAdminKey(req)) {
@@ -15,7 +14,7 @@ export async function POST(req: NextRequest) {
   if (!start || !end || new Date(start) >= new Date(end)) {
     return NextResponse.json({ error: "invalid period" }, { status: 400 });
   }
-  await kv.set(PERIOD_KEY, { start, end });
+  await redis.set(PERIOD_KEY, { start, end });
   return NextResponse.json({ ok: true });
 }
 
@@ -23,6 +22,6 @@ export async function DELETE(req: NextRequest) {
   if (!checkAdminKey(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  await kv.del(PERIOD_KEY);
+  await redis.del(PERIOD_KEY);
   return NextResponse.json({ ok: true });
 }
