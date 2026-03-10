@@ -49,19 +49,7 @@ function Medal({ rank }: { rank: number }) {
   return <span style={{ fontSize:"1rem", lineHeight:1 }}>{["🥇","🥈","🥉"][rank-1]}</span>;
 }
 
-function useReveal() {
-  useEffect(() => {
-    const obs = new IntersectionObserver(
-      entries => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add("show"); }),
-      { rootMargin: "0px 0px -40px 0px" }
-    );
-    document.querySelectorAll(".reveal").forEach(el => obs.observe(el));
-    return () => obs.disconnect();
-  }, []);
-}
-
 export default function Page() {
-  useReveal();
 
   const [votes, setVotes] = useState<Record<string, number>>(() => {
     if (typeof window === "undefined") return Object.fromEntries(ONIGIRI.map(o => [o.id, 0]));
@@ -90,6 +78,19 @@ export default function Page() {
   useEffect(() => {
     localStorage.setItem("chobei_votes_v2", JSON.stringify(votes));
   }, [votes]);
+
+  // タブ切替時にreveal要素を再監視
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const obs = new IntersectionObserver(
+        entries => entries.forEach(e => { if (e.isIntersecting) e.target.classList.add("show"); }),
+        { rootMargin: "0px 0px -40px 0px" }
+      );
+      document.querySelectorAll(".reveal").forEach(el => obs.observe(el));
+      return () => obs.disconnect();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [tab]);
 
   const totalVotes = Object.values(votes).reduce((a, b) => a + b, 0);
 
